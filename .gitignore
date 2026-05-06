@@ -1,0 +1,21 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Videos
+*.mp4
+*.mov
+*.avi
+
+# Generated data
+*.csv
+
+# MediaPipe model files
+*.task
+
+# VS Code
+.vscode/
+
+# Virtual environments
+.venv/
+venv/
