@@ -11,12 +11,18 @@ from mediapipe.tasks.python import vision
 # =========================
 
 model_path = "D:/Seha/HCI/face_landmarker.task"
-output_csv = "D:/Seha/HCI/user_expression_custom.csv"
+
+# 분석할 영상 파일 경로
+video_path = "D:/Seha/HCI/actor_video_4.mp4"
+
+# 분석 결과 CSV 저장 경로
+output_csv = "D:/Seha/HCI/video_expression_mediapipe.csv"
 
 
 # =========================
 # 2. 감정 민감도 설정
 # =========================
+# 값이 클수록 해당 감정 퍼센트가 더 잘 올라감
 
 SENSITIVITY = {
     "joy": 4.0,
@@ -43,20 +49,26 @@ detector = vision.FaceLandmarker.create_from_options(options)
 
 
 # =========================
-# 4. 웹캠 열기
+# 4. 영상 열기
 # =========================
 
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(video_path)
 
 if not cap.isOpened():
-    print("0번 카메라를 열 수 없습니다. 1번 카메라를 시도합니다.")
-    cap = cv2.VideoCapture(1)
-
-if not cap.isOpened():
-    print("웹캠을 열 수 없습니다. 카메라 연결과 권한을 확인하세요.")
+    print("영상 파일을 열 수 없습니다. video_path를 확인하세요.")
     exit()
 
-print("웹캠 실시간 감정 분석 시작!")
+fps = cap.get(cv2.CAP_PROP_FPS)
+total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+if fps <= 0:
+    fps = 30
+
+delay = int(1000 / fps)
+
+print("영상 실시간 분석 시작!")
+print("FPS:", fps)
+print("총 프레임 수:", total_frames)
 print("q를 누르면 종료하고 CSV로 저장합니다.")
 
 
@@ -111,6 +123,9 @@ def calculate_emotions(data):
     brow_down_left = data.get("browDownLeft", 0)
     brow_down_right = data.get("browDownRight", 0)
 
+    brow_outer_up_left = data.get("browOuterUpLeft", 0)
+    brow_outer_up_right = data.get("browOuterUpRight", 0)
+
     # 눈 관련
     eye_squint_left = data.get("eyeSquintLeft", 0)
     eye_squint_right = data.get("eyeSquintRight", 0)
@@ -129,6 +144,8 @@ def calculate_emotions(data):
     smile_avg = (mouth_smile_left + mouth_smile_right) / 2
     eye_wide_avg = (eye_wide_left + eye_wide_right) / 2
     mouth_press_avg = (mouth_press_left + mouth_press_right) / 2
+    brow_outer_up_avg = (brow_outer_up_left + brow_outer_up_right) / 2
+    brow_up_avg = (brow_inner_up + brow_outer_up_avg) / 2
 
     # =========================
     # Joy
@@ -183,7 +200,7 @@ def calculate_emotions(data):
     if not (smile_avg < 0.15 and eye_wide_avg > 0.18):
         anger_raw = anger_raw * (1 - jaw_open * 0.4)
 
-    # =========================
+   # =========================
     # Surprise
     # 입 벌림 + 눈썹 상승 + 눈 커짐
     # =========================
@@ -203,20 +220,23 @@ def calculate_emotions(data):
     if smile_avg < 0.15 and eye_wide_avg > 0.18 and jaw_open < 0.25:
         surprise_raw *= 0.5
 
+    # =========================
     # CSV 저장용 원본값
+    # =========================
     data["joy_raw"] = joy_raw
     data["sadness_raw"] = sadness_raw
     data["anger_raw"] = anger_raw
     data["surprise_raw"] = surprise_raw
 
+    # =========================
     # 화면 표시용 퍼센트
+    # =========================
     data["joy"] = raw_to_percent(joy_raw, "joy")
     data["sadness"] = raw_to_percent(sadness_raw, "sadness")
     data["anger"] = raw_to_percent(anger_raw, "anger")
     data["surprise"] = raw_to_percent(surprise_raw, "surprise")
 
     return data
-
 
 def get_face_box(face_landmarks, frame_width, frame_height):
     x_values = []
@@ -306,7 +326,7 @@ def draw_emotion_box(frame, box, emotion, percent):
 
 
 # =========================
-# 7. 웹캠 실시간 분석 루프
+# 7. 영상 실시간 분석 루프
 # =========================
 
 results = []
@@ -320,13 +340,10 @@ while True:
     ret, frame = cap.read()
 
     if not ret:
-        print("웹캠 프레임을 읽을 수 없습니다.")
+        print("영상 분석 완료.")
         break
 
     frame_idx += 1
-
-    # 거울처럼 보이게 좌우 반전
-    frame = cv2.flip(frame, 1)
 
     height, width, _ = frame.shape
 
@@ -366,13 +383,19 @@ while True:
 
             results.append(data)
 
-    # 얼굴 박스와 감정 표시
+    # =========================
+    # 8. 얼굴 박스와 감정 표시
+    # =========================
+
     if last_box is not None:
         draw_emotion_box(frame, last_box, last_emotion, last_percent)
 
+    # 진행률 표시
+    progress = frame_idx / total_frames * 100 if total_frames > 0 else 0
+
     cv2.putText(
         frame,
-        "Press q to finish",
+        f"Progress: {progress:.1f}%",
         (30, height - 30),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.7,
@@ -380,22 +403,25 @@ while True:
         2
     )
 
-    cv2.imshow("Real-Time Webcam Expression Analysis", frame)
+    cv2.imshow("Real-Time Video Expression Analysis", frame)
 
-    if cv2.waitKey(1) & 0xFF == ord("q"):
+    # 실제 영상 FPS에 맞춰 재생
+    key = cv2.waitKey(delay) & 0xFF
+
+    if key == ord("q"):
         print("q 입력됨. 분석을 종료합니다.")
         break
 
 
 # =========================
-# 8. CSV 저장
+# 9. CSV 저장
 # =========================
 
 cap.release()
 cv2.destroyAllWindows()
 
 if len(results) == 0:
-    print("저장할 데이터가 없습니다. 얼굴이 웹캠에 잘 보이는지 확인하세요.")
+    print("저장할 데이터가 없습니다. 영상에서 얼굴이 잘 보이는지 확인하세요.")
 else:
     df = pd.DataFrame(results)
     df.to_csv(output_csv, index=False, encoding="utf-8-sig")
@@ -405,5 +431,5 @@ else:
     print("저장된 프레임 수:", len(df))
 
     emotion_cols = ["joy", "sadness", "anger", "surprise"]
-    print("\n사용자 평균 감정 표현 강도:")
+    print("\n영상 평균 감정 표현 강도:")
     print(df[emotion_cols].mean())
