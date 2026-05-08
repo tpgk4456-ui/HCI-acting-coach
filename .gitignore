@@ -8,3 +8,25 @@ __pycache__/
 # Virtual environments
 .venv/
 venv/
+
+# Generated outputs
+*.csv
+aihub_input/
+
+# Videos
+*.mp4
+*.mov
+*.avi
+
+# MediaPipe model file
+*.task
+
+# AI Hub Docker model files
+*.tar
+*.tar.gz
+*.zip
+
+# AI Hub downloaded folders
+03.AI모델/
+01.데이터/
+02.라벨링데이터/
