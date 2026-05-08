@@ -10,8 +10,8 @@ from mediapipe.tasks.python import vision
 # 1. 파일 경로 설정
 # =========================
 
-model_path = "D:/Seha/HCI/face_landmarker.task"
-output_csv = "D:/Seha/HCI/user_expression_custom.csv"
+model_path = "face_landmarker.task"
+output_csv = "user_expression_custom.csv"
 
 
 # =========================
@@ -46,11 +46,11 @@ detector = vision.FaceLandmarker.create_from_options(options)
 # 4. 웹캠 열기
 # =========================
 
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(1)
 
 if not cap.isOpened():
-    print("0번 카메라를 열 수 없습니다. 1번 카메라를 시도합니다.")
-    cap = cv2.VideoCapture(1)
+    print("1번 카메라를 열 수 없습니다.")
+    exit()
 
 if not cap.isOpened():
     print("웹캠을 열 수 없습니다. 카메라 연결과 권한을 확인하세요.")
@@ -111,6 +111,10 @@ def calculate_emotions(data):
     brow_down_left = data.get("browDownLeft", 0)
     brow_down_right = data.get("browDownRight", 0)
 
+    #surprise 관련 데이터 추가함
+    brow_outer_up_left = data.get("browOuterUpLeft", 0)
+    brow_outer_up_right = data.get("browOuterUpRight", 0)
+
     # 눈 관련
     eye_squint_left = data.get("eyeSquintLeft", 0)
     eye_squint_right = data.get("eyeSquintRight", 0)
@@ -129,6 +133,8 @@ def calculate_emotions(data):
     smile_avg = (mouth_smile_left + mouth_smile_right) / 2
     eye_wide_avg = (eye_wide_left + eye_wide_right) / 2
     mouth_press_avg = (mouth_press_left + mouth_press_right) / 2
+    brow_outer_up_avg = (brow_outer_up_left + brow_outer_up_right) / 2
+    brow_up_avg = (brow_inner_up + brow_outer_up_avg) / 2
 
     # =========================
     # Joy
@@ -187,12 +193,30 @@ def calculate_emotions(data):
     # Surprise
     # 입 벌림 + 눈썹 상승 + 눈 커짐
     # =========================
-    surprise_raw = (
+    '''surprise_raw = (
         jaw_open * 0.35 +
         brow_inner_up * 0.25 +
         eye_wide_left * 0.20 +
         eye_wide_right * 0.20
+    )'''
+    
+    anger_signal = (
+        brow_down_left + brow_down_right +
+        eye_squint_left + eye_squint_right +
+        nose_sneer_left + nose_sneer_right +
+        mouth_press_left + mouth_press_right
+    ) / 8
+
+    # Surprise는 눈썹 전체 상승 + 눈 커짐 + 입 벌림이 같이 있어야 높게
+    surprise_raw = (
+        jaw_open * 0.30 +
+        brow_up_avg * 0.30 +
+        eye_wide_left * 0.20 +
+        eye_wide_right * 0.20
     )
+
+    # 분노 신호가 강하면 Surprise 감점
+    surprise_raw *= (1 - anger_signal * 0.5)
 
     # 입만 벌린 경우 Surprise 과대 인식 방지
     if jaw_open > 0.4 and brow_inner_up < 0.15 and eye_wide_avg < 0.15:

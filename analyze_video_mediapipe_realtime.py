@@ -10,13 +10,9 @@ from mediapipe.tasks.python import vision
 # 1. 파일 경로 설정
 # =========================
 
-model_path = "D:/Seha/HCI/face_landmarker.task"
-
-# 분석할 영상 파일 경로
-video_path = "D:/Seha/HCI/actor_video_4.mp4"
-
-# 분석 결과 CSV 저장 경로
-output_csv = "D:/Seha/HCI/video_expression_mediapipe.csv"
+model_path = "face_landmarker.task"
+video_path = "actor_video.mp4"
+output_csv = "video_expression_mediapipe.csv"
 
 
 # =========================
@@ -204,12 +200,29 @@ def calculate_emotions(data):
     # Surprise
     # 입 벌림 + 눈썹 상승 + 눈 커짐
     # =========================
-    surprise_raw = (
+    '''surprise_raw = (
         jaw_open * 0.35 +
         brow_inner_up * 0.25 +
         eye_wide_left * 0.20 +
         eye_wide_right * 0.20
+    )'''
+    anger_signal = (
+        brow_down_left + brow_down_right +
+        eye_squint_left + eye_squint_right +
+        nose_sneer_left + nose_sneer_right +
+        mouth_press_left + mouth_press_right
+    ) / 8
+
+    # Surprise는 눈썹 전체 상승 + 눈 커짐 + 입 벌림이 같이 있어야 높게
+    surprise_raw = (
+        jaw_open * 0.30 +
+        brow_up_avg * 0.30 +
+        eye_wide_left * 0.20 +
+        eye_wide_right * 0.20
     )
+
+    # 분노 신호가 강하면 Surprise 감점
+    surprise_raw *= (1 - anger_signal * 0.5)
 
     # 입만 벌린 경우 Surprise 과대 인식 방지
     if jaw_open > 0.4 and brow_inner_up < 0.15 and eye_wide_avg < 0.15:
