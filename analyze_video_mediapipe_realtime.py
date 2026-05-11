@@ -11,7 +11,7 @@ from mediapipe.tasks.python import vision
 # =========================
 
 model_path = "face_landmarker.task"
-video_path = "actor_video.mp4"
+video_path = "actor_video_2.mp4"
 output_csv = "video_expression_mediapipe.csv"
 
 
