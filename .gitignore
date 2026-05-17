@@ -13,6 +13,10 @@ venv/
 *.csv
 aihub_input/
 
+# Keep distribution CSV files
+!anger_distribution.csv
+!neutral_distribution.csv
+
 # Videos
 *.mp4
 *.mov

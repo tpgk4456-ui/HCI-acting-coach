@@ -1,6 +1,8 @@
 import cv2
 import mediapipe as mp
+import numpy as np
 import pandas as pd
+
 
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
@@ -11,10 +13,12 @@ from mediapipe.tasks.python import vision
 # =========================
 
 model_path = "face_landmarker.task"
-video_path = "actor_video.mp4"
+video_path = "actor_video_4.mp4"
 output_csv = "video_expression_mediapipe.csv"
 
 
+neutral_distribution_path = "neutral_distribution.csv"
+anger_distribution_path = "anger_distribution.csv"
 # =========================
 # 2. 감정 민감도 설정
 # =========================
@@ -102,6 +106,120 @@ def get_emotion_color(emotion):
 # =========================
 # 6. 감정 계산 함수
 # =========================
+# =========================
+# 6. AI-Hub 기준 분포 로드 / 비교 함수
+# =========================
+
+AIHUB_COMPARE_KEYS = [
+    "browDownLeft",
+    "browDownRight",
+    "eyeSquintLeft",
+    "eyeSquintRight",
+    "mouthPressLeft",
+    "mouthPressRight",
+    "noseSneerLeft",
+    "noseSneerRight",
+    "mouthSmileLeft",
+    "mouthSmileRight",
+    "mouthFrownLeft",
+    "mouthFrownRight",
+    "browInnerUp",
+    "eyeWideLeft",
+    "eyeWideRight",
+    "jawOpen"
+]
+
+STD_FLOOR = 0.02
+AIHUB_ANGER_SCORE_THRESHOLD = 58
+AIHUB_DISTANCE_MARGIN = 0.95
+AIHUB_MIN_ANGER_CORE = 0.03
+
+
+def load_distribution_csv(csv_path):
+    distribution_df = pd.read_csv(csv_path)
+
+    distribution = {}
+
+    for _, row in distribution_df.iterrows():
+        blendshape_name = row["blendshape"]
+
+        distribution[blendshape_name] = {
+            "mean": float(row["mean"]),
+            "std": float(row["std"])
+        }
+
+    return distribution
+
+
+neutral_distribution = load_distribution_csv(neutral_distribution_path)
+anger_distribution = load_distribution_csv(anger_distribution_path)
+
+
+def calculate_distribution_distance(data, distribution):
+    squared_z_values = []
+
+    for key in AIHUB_COMPARE_KEYS:
+        if key not in distribution:
+            continue
+
+        value = float(data.get(key, 0.0))
+        mean_value = distribution[key]["mean"]
+        std_value = max(distribution[key]["std"], STD_FLOOR)
+
+        z_value = (value - mean_value) / std_value
+        squared_z_values.append(z_value ** 2)
+
+    if len(squared_z_values) == 0:
+        return None
+
+    return float(np.sqrt(np.mean(squared_z_values)))
+
+
+def add_aihub_reference_scores(data):
+    neutral_distance = calculate_distribution_distance(data, neutral_distribution)
+    anger_distance = calculate_distribution_distance(data, anger_distribution)
+
+    if neutral_distance is None or anger_distance is None:
+        data["aihub_neutral_distance"] = None
+        data["aihub_anger_distance"] = None
+        data["aihub_neutral_score"] = 0
+        data["aihub_anger_score"] = 0
+        data["aihub_reference_emotion"] = "Unknown"
+        return data
+
+    total_distance = neutral_distance + anger_distance
+
+    if total_distance == 0:
+        neutral_score = 50
+        anger_score = 50
+    else:
+        neutral_score = anger_distance / total_distance * 100
+        anger_score = neutral_distance / total_distance * 100
+
+    data["aihub_neutral_distance"] = neutral_distance
+    data["aihub_anger_distance"] = anger_distance
+    data["aihub_neutral_score"] = neutral_score
+    data["aihub_anger_score"] = anger_score
+
+    if anger_distance < neutral_distance:
+        data["aihub_reference_emotion"] = "Anger"
+    else:
+        data["aihub_reference_emotion"] = "Neutral"
+
+    return data
+
+
+def calculate_anger_core(data):
+    anger_core = (
+        data.get("browDownLeft", 0.0) +
+        data.get("browDownRight", 0.0) +
+        data.get("eyeSquintLeft", 0.0) +
+        data.get("eyeSquintRight", 0.0) +
+        data.get("mouthPressLeft", 0.0) +
+        data.get("mouthPressRight", 0.0)
+    ) / 6
+
+    return anger_core
 
 def calculate_emotions(data):
     # 입 관련
@@ -278,9 +396,38 @@ def get_dominant_emotion(data):
     emotion = max(emotions, key=emotions.get)
     percent = emotions[emotion]
 
-    # 너무 낮으면 무표정으로 처리
+    aihub_neutral_distance = data.get("aihub_neutral_distance", None)
+    aihub_anger_distance = data.get("aihub_anger_distance", None)
+    aihub_anger_score = data.get("aihub_anger_score", 0)
+    aihub_neutral_score = data.get("aihub_neutral_score", 0)
+
+    anger_core = calculate_anger_core(data)
+    data["anger_core"] = anger_core
+
+    if aihub_neutral_distance is not None and aihub_anger_distance is not None:
+        anger_is_closer = aihub_anger_distance < aihub_neutral_distance * AIHUB_DISTANCE_MARGIN
+    else:
+        anger_is_closer = False
+
     if percent < 15:
-        return "Neutral", 0
+        if (
+            anger_is_closer and
+            aihub_anger_score >= AIHUB_ANGER_SCORE_THRESHOLD and
+            anger_core >= AIHUB_MIN_ANGER_CORE
+        ):
+            return "Anger", max(30, aihub_anger_score)
+
+        return "Neutral", aihub_neutral_score
+
+    if emotion == "Anger":
+        return "Anger", max(percent, aihub_anger_score)
+
+    if (
+        anger_is_closer and
+        aihub_anger_score >= 65 and
+        anger_core >= AIHUB_MIN_ANGER_CORE
+    ):
+        return "Anger", max(percent, aihub_anger_score)
 
     return emotion, percent
 
@@ -385,6 +532,8 @@ while True:
 
             data = calculate_emotions(data)
 
+            data = add_aihub_reference_scores(data)
+
             emotion, percent = get_dominant_emotion(data)
 
             last_box = get_face_box(face_landmarks, width, height)
@@ -435,6 +584,7 @@ cv2.destroyAllWindows()
 
 if len(results) == 0:
     print("저장할 데이터가 없습니다. 영상에서 얼굴이 잘 보이는지 확인하세요.")
+
 else:
     df = pd.DataFrame(results)
     df.to_csv(output_csv, index=False, encoding="utf-8-sig")
@@ -443,6 +593,22 @@ else:
     print("저장 위치:", output_csv)
     print("저장된 프레임 수:", len(df))
 
-    emotion_cols = ["joy", "sadness", "anger", "surprise"]
+    emotion_cols = [
+        "joy",
+        "sadness",
+        "anger",
+        "surprise",
+        "aihub_neutral_score",
+        "aihub_anger_score",
+        "aihub_neutral_distance",
+        "aihub_anger_distance"
+    ]
+
     print("\n영상 평균 감정 표현 강도:")
     print(df[emotion_cols].mean())
+
+    print("\n최종 감정 분류 개수:")
+    print(df["dominant_emotion"].value_counts())
+
+    print("\nAI-Hub 기준 감정 분류 개수:")
+    print(df["aihub_reference_emotion"].value_counts())
