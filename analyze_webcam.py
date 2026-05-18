@@ -614,8 +614,9 @@ def draw_emotion_box(frame, box, emotion, percent):
     if box is None:
         return
 
-    if emotion == "Neutral":
-        return
+    # Neutral일 때도 박스를 표시하려면 아래 코드를 삭제/주석 처리
+    # if emotion == "Neutral":
+    #     return
 
     x_min, y_min, x_max, y_max = box
     box_color = get_emotion_color(emotion)
@@ -656,7 +657,6 @@ def draw_emotion_box(frame, box, emotion, percent):
         (0, 0, 0),
         thickness
     )
-
 
 def draw_status_text(frame, text, y, color=(255, 255, 255)):
     cv2.putText(
