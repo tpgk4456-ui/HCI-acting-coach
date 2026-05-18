@@ -16,6 +16,7 @@ aihub_input/
 # Keep distribution CSV files
 !anger_distribution.csv
 !neutral_distribution.csv
+!sadness_distribution.csv
 
 # Videos
 *.mp4
